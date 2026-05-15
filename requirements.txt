@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg[binary]
+python-jose[cryptography]
+passlib[bcrypt]
+python-dotenv
+pydantic
+httpx
+firebase-admin
+redis
+aiofiles
+python-multipart
+alembic
+gunicorn

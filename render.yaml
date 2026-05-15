@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: ai-inventory-backend
+    env: python
+    branch: main
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: gunicorn -c backend/gunicorn_conf.py backend.main:app
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase: false
+      - key: OPENROUTER_API_KEY
+        fromDatabase: false
+      - key: REDIS_URL
+        fromDatabase: false
+      - key: FIREBASE_PROJECT_ID
+        fromDatabase: false
+      - key: FIREBASE_CLIENT_EMAIL
+        fromDatabase: false
+      - key: FIREBASE_PRIVATE_KEY
+        fromDatabase: false
+      - key: FIREBASE_PRIVATE_KEY_ID
+        fromDatabase: false
+      - key: FIREBASE_CLIENT_ID
+        fromDatabase: false
+      - key: FIREBASE_CLIENT_X509_CERT_URL
+        fromDatabase: false
+      - key: FRONTEND_URL
+        fromDatabase: false

@@ -1,0 +1,75 @@
+# .dockerignore for AI Inventory Management System
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Node.js (for frontend)
+node_modules/
+.next/
+out/
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+docs/
+
+# Deployment files
+deploy.sh
+deploy.ps1
+
+# Temporary files
+*.tmp
+*.temp
