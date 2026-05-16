@@ -1,20 +1,7 @@
 [build]
-builder = "python"
-buildCommand = "pip install -r requirements.txt"
+builder = "DOCKERFILE"
 
 [deploy]
-startCommand = "python app.py"
 healthcheckPath = "/healthz"
 healthcheckTimeout = 10
 restartPolicyType = "ON_FAILURE"
-
-[env]
-DATABASE_URL = "${DATABASE_URL}"
-OPENROUTER_API_KEY = "${OPENROUTER_API_KEY}"
-OPENROUTER_MODEL = "deepseek/deepseek-chat:free"
-FIREBASE_PROJECT_ID = "${FIREBASE_PROJECT_ID}"
-FRONTEND_URL = "${FRONTEND_URL}"
-AUTH_MODE = "firebase"
-ENVIRONMENT = "production"
-CLOUD_PLATFORM = "railway"
-PORT = "8000"
