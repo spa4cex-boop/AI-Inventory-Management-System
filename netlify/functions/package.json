@@ -1,0 +1,17 @@
+{
+  "name": "ai-inventory-netlify-functions",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Netlify Functions for AI Inventory Management System",
+  "main": "api.js",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "axios": "^1.7.0",
+    "firebase-admin": "^11.11.0",
+    "serverless-http": "^3.0.0"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}

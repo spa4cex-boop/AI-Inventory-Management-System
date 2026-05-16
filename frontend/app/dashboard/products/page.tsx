@@ -1,51 +1,87 @@
 "use client"
 
-import { FormEvent, useEffect, useState } from 'react'
-import api from '../../../services/api'
+import { useEffect, useState } from 'react'
+import { fetchCategories, fetchProducts, fetchSuppliers, createProduct, createProductsBulk, updateProduct, deleteProduct } from '../../../services/api'
+import { uploadProductImage } from '../../../services/firebaseStorage'
 import { Sidebar } from '../../../components/sidebar'
 import { Card } from '../../../components/ui/card'
+import type { Category, Product, Supplier } from '../../../types'
 
-interface Product {
-  id: number
+interface ProductFormState {
   name: string
   sku: string
-  quantity: number
+  barcode: string
   price: number
-  reorder_level: number
+  quantity: number
+  reorderLevel: number
+  categoryId: string
+  categoryName: string
+  supplierId: string
+  supplierName: string
+  expiryDate: string
 }
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState({
+  const [bulkCsv, setBulkCsv] = useState<string>('')
+  const [form, setForm] = useState<ProductFormState>({
     name: '',
     sku: '',
-    quantity: 0,
+    barcode: '',
     price: 0,
-    reorder_level: 0,
+    quantity: 0,
+    reorderLevel: 0,
+    categoryId: '',
+    categoryName: '',
+    supplierId: '',
+    supplierName: '',
+    expiryDate: '',
   })
-  const [editId, setEditId] = useState<number | null>(null)
-
-  const fetchProducts = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await api.get('/products')
-      setProducts(response.data)
-    } catch (err) {
-      setError('Unable to load products. Please make sure the backend is running.')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [editId, setEditId] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchProducts()
+    const loadData = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const [productData, categoryData, supplierData] = await Promise.all([
+          fetchProducts(),
+          fetchCategories(),
+          fetchSuppliers(),
+        ])
+        setProducts(productData)
+        setCategories(categoryData)
+        setSuppliers(supplierData)
+      } catch {
+        setError('Unable to load product data. Check your API connection.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadData()
   }, [])
 
   const resetForm = () => {
-    setForm({ name: '', sku: '', quantity: 0, price: 0, reorder_level: 0 })
+    setForm({
+      name: '',
+      sku: '',
+      barcode: '',
+      price: 0,
+      quantity: 0,
+      reorderLevel: 0,
+      categoryId: '',
+      categoryName: '',
+      supplierId: '',
+      supplierName: '',
+      expiryDate: '',
+    })
+    setImageFile(null)
     setEditId(null)
   }
 
@@ -55,28 +91,37 @@ export default function ProductsPage() {
     setError(null)
 
     try {
-      if (editId) {
-        const response = await api.put(`/products/${editId}`, {
-          name: form.name,
-          sku: form.sku,
-          quantity: form.quantity,
-          price: form.price,
-          reorder_level: form.reorder_level,
-        })
-        setProducts((current) => current.map((item) => (item.id === response.data.id ? response.data : item)))
-      } else {
-        const response = await api.post('/products', {
-          name: form.name,
-          sku: form.sku,
-          quantity: form.quantity,
-          price: form.price,
-          reorder_level: form.reorder_level,
-        })
-        setProducts((current) => [response.data, ...current])
+      let imageUrl: string | undefined
+      if (imageFile) {
+        imageUrl = await uploadProductImage(imageFile)
       }
+
+      const payload = {
+        name: form.name,
+        sku: form.sku,
+        barcode: form.barcode || undefined,
+        price: form.price,
+        quantity: form.quantity,
+        reorderLevel: form.reorderLevel,
+        categoryId: form.categoryId || undefined,
+        categoryName: form.categoryName || undefined,
+        supplierId: form.supplierId || undefined,
+        supplierName: form.supplierName || undefined,
+        expiryDate: form.expiryDate || undefined,
+        imageUrl,
+      }
+
+      if (editId) {
+        const updated = await updateProduct(editId, payload)
+        setProducts((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+      } else {
+        const created = await createProduct(payload)
+        setProducts((current) => [created, ...current])
+      }
+
       resetForm()
-    } catch (err) {
-      setError('Unable to save product. Please verify the backend API is available.')
+    } catch {
+      setError('Unable to save the product. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -87,24 +132,75 @@ export default function ProductsPage() {
     setForm({
       name: product.name,
       sku: product.sku,
-      quantity: product.quantity,
+      barcode: product.barcode ?? '',
       price: product.price,
-      reorder_level: product.reorder_level,
+      quantity: product.quantity,
+      reorderLevel: product.reorderLevel,
+      categoryId: product.categoryId ?? '',
+      categoryName: product.categoryName ?? '',
+      supplierId: product.supplierId ?? '',
+      supplierName: product.supplierName ?? '',
+      expiryDate: product.expiryDate ?? '',
     })
   }
 
-  const handleDelete = async (id: number) => {
+  const handleBulkImport = async () => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const rows = bulkCsv
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+
+      if (rows.length === 0) {
+        throw new Error('Enter at least one product row to import.')
+      }
+
+      const hasHeader = rows[0].toLowerCase().includes('name') && rows[0].toLowerCase().includes('sku')
+      const dataRows = hasHeader ? rows.slice(1) : rows
+      const productsToImport = dataRows.map((row) => {
+        const columns = row.split(',').map((value) => value.trim())
+        return {
+          name: columns[0] || '',
+          sku: columns[1] || '',
+          quantity: Number(columns[2] || 0),
+          price: Number(columns[3] || 0),
+          reorderLevel: Number(columns[4] || 0),
+          categoryName: columns[5] || undefined,
+          supplierName: columns[6] || undefined,
+          expiryDate: columns[7] || undefined,
+        }
+      })
+
+      const invalidProduct = productsToImport.find((product) => !product.name || !product.sku)
+      if (invalidProduct) {
+        throw new Error('Each imported product must include at least a name and SKU.')
+      }
+
+      const created = await createProductsBulk(productsToImport)
+      setProducts((current) => [...created, ...current])
+      setBulkCsv('')
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unable to import products. Please check the CSV format.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
     if (!confirm('Delete this product?')) {
       return
     }
     setLoading(true)
     setError(null)
     try {
-      await api.delete(`/products/${id}`)
+      await deleteProduct(id)
       setProducts((current) => current.filter((item) => item.id !== id))
       if (editId === id) resetForm()
-    } catch (err) {
-      setError('Unable to delete product. Please try again.')
+    } catch {
+      setError('Unable to delete the product. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -132,7 +228,7 @@ export default function ProductsPage() {
                     type="text"
                     value={form.name}
                     onChange={(event) => setForm({ ...form, name: event.target.value })}
-                    placeholder="Name"
+                    placeholder="Product Name"
                     className="w-full rounded-3xl border border-white/10 bg-slate-950/80 p-4 text-white outline-none"
                     required
                   />
@@ -145,6 +241,23 @@ export default function ProductsPage() {
                     required
                   />
                 </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <input
+                    type="text"
+                    value={form.barcode}
+                    onChange={(event) => setForm({ ...form, barcode: event.target.value })}
+                    placeholder="Barcode"
+                    className="w-full rounded-3xl border border-white/10 bg-slate-950/80 p-4 text-white outline-none"
+                  />
+                  <input
+                    type="date"
+                    value={form.expiryDate}
+                    onChange={(event) => setForm({ ...form, expiryDate: event.target.value })}
+                    className="w-full rounded-3xl border border-white/10 bg-slate-950/80 p-4 text-white outline-none"
+                  />
+                </div>
+
                 <div className="grid gap-4 sm:grid-cols-3">
                   <input
                     type="number"
@@ -159,19 +272,77 @@ export default function ProductsPage() {
                     step="0.01"
                     value={form.price}
                     onChange={(event) => setForm({ ...form, price: Number(event.target.value) })}
-                    placeholder="Price"
+                    placeholder="Price (PKR)"
                     className="w-full rounded-3xl border border-white/10 bg-slate-950/80 p-4 text-white outline-none"
                     required
                   />
                   <input
                     type="number"
-                    value={form.reorder_level}
-                    onChange={(event) => setForm({ ...form, reorder_level: Number(event.target.value) })}
+                    value={form.reorderLevel}
+                    onChange={(event) => setForm({ ...form, reorderLevel: Number(event.target.value) })}
                     placeholder="Reorder level"
                     className="w-full rounded-3xl border border-white/10 bg-slate-950/80 p-4 text-white outline-none"
                     required
                   />
                 </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <select
+                    value={form.categoryId}
+                    onChange={(event) => {
+                      const selected = categories.find((category) => category.id === event.target.value)
+                      setForm({
+                        ...form,
+                        categoryId: event.target.value,
+                        categoryName: selected?.name ?? event.target.value,
+                      })
+                    }}
+                    className="w-full rounded-3xl border border-white/10 bg-slate-950/80 p-4 text-white outline-none"
+                  >
+                    <option value="">Select category</option>
+                    {categories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={form.supplierId}
+                    onChange={(event) => {
+                      const selected = suppliers.find((supplier) => supplier.id === event.target.value)
+                      setForm({
+                        ...form,
+                        supplierId: event.target.value,
+                        supplierName: selected?.name ?? event.target.value,
+                      })
+                    }}
+                    className="w-full rounded-3xl border border-white/10 bg-slate-950/80 p-4 text-white outline-none"
+                  >
+                    <option value="">Select supplier</option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="relative block rounded-3xl border border-white/10 bg-slate-950/80 p-4 text-slate-300">
+                    <span className="text-sm text-slate-400">Product image</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => setImageFile(event.target.files?.[0] ?? null)}
+                      className="mt-3 w-full text-sm text-slate-200 file:mr-4 file:rounded-full file:border-0 file:bg-cyan-500 file:px-4 file:py-2 file:text-sm file:text-slate-950"
+                    />
+                  </label>
+                  <div className="rounded-3xl border border-white/10 bg-slate-950/80 p-4 text-sm text-slate-400">
+                    <p>Optional image upload for product cards and inventory management.</p>
+                    <p className="mt-3 text-xs text-slate-500">Accepted formats: PNG, JPG, JPEG.</p>
+                  </div>
+                </div>
+
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <button
                     type="submit"
@@ -194,6 +365,27 @@ export default function ProductsPage() {
               {error && <p className="mt-4 rounded-2xl bg-red-500/10 p-4 text-red-300">{error}</p>}
             </Card>
 
+            <Card title="Bulk import products">
+              <p className="text-sm text-slate-400">
+                Paste CSV rows with columns: <span className="font-semibold">name, sku, quantity, price (PKR), reorderLevel, categoryName, supplierName, expiryDate</span>
+              </p>
+              <textarea
+                value={bulkCsv}
+                onChange={(event) => setBulkCsv(event.target.value)}
+                rows={8}
+                className="mt-4 w-full rounded-3xl border border-white/10 bg-slate-950/80 p-4 text-white outline-none"
+                placeholder="Product A, SKU001, 10, 1250.00, 5, Electronics, Supplier A, 2025-12-31"
+              />
+              <button
+                type="button"
+                onClick={handleBulkImport}
+                disabled={loading}
+                className="mt-4 rounded-3xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Import bulk products
+              </button>
+            </Card>
+
             <Card title="Product list">
               {loading && <p className="text-slate-400">Loading products…</p>}
               {!loading && products.length === 0 && <p className="text-slate-400">No products found. Add one to get started.</p>}
@@ -204,9 +396,9 @@ export default function ProductsPage() {
                       <tr>
                         <th className="px-4 py-3 font-semibold text-white">Name</th>
                         <th className="px-4 py-3 font-semibold text-white">SKU</th>
+                        <th className="px-4 py-3 font-semibold text-white">Category</th>
                         <th className="px-4 py-3 font-semibold text-white">Qty</th>
                         <th className="px-4 py-3 font-semibold text-white">Price</th>
-                        <th className="px-4 py-3 font-semibold text-white">Reorder</th>
                         <th className="px-4 py-3 font-semibold text-white">Actions</th>
                       </tr>
                     </thead>
@@ -215,9 +407,9 @@ export default function ProductsPage() {
                         <tr key={product.id} className="border-t border-white/10">
                           <td className="px-4 py-4">{product.name}</td>
                           <td className="px-4 py-4">{product.sku}</td>
+                          <td className="px-4 py-4">{product.categoryName ?? 'General'}</td>
                           <td className="px-4 py-4">{product.quantity}</td>
-                          <td className="px-4 py-4">${product.price.toFixed(2)}</td>
-                          <td className="px-4 py-4">{product.reorder_level}</td>
+                          <td className="px-4 py-4">PKR {product.price.toFixed(2)}</td>
                           <td className="px-4 py-4 space-x-2">
                             <button
                               type="button"

@@ -13,6 +13,8 @@ __pycache__/
 node_modules/
 .next/
 out/
+public/
+node/
 
 # Logs
 npm-debug.log*
@@ -25,3 +27,6 @@ yarn-error.log*
 # Docker
 .Dockerfile
 **/*.log
+
+# Local Netlify folder
+.netlify

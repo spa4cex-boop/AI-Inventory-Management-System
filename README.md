@@ -1,15 +1,25 @@
 # AI Inventory Management System - Cloud Deployment
 
-A modern, cloud-first inventory management SaaS platform with AI-powered operations. Deployed on free-tier cloud platforms with Firebase authentication and PostgreSQL database.
+A modern, cloud-first inventory management SaaS platform with AI-powered operations. This repository is configured for cloud deployment only and is designed to run on hosted platforms rather than local machines.
 
-## 🚀 Architecture Overview
+## 🚀 Deployment Options
 
-- **Frontend**: Next.js 15 deployed on **Vercel** (free tier)
+### Option 1: **Netlify** (Recommended - Easiest Setup)
+- **Frontend**: Next.js on Netlify static hosting
+- **Backend**: Express.js on Netlify Functions
+- **Database**: Firebase Firestore
+- **Status**: ✅ Ready for production
+- **Setup Time**: ~15 minutes
+- **See**: [NETLIFY_DEPLOYMENT_GUIDE.md](NETLIFY_DEPLOYMENT_GUIDE.md)
+- **Build command**: `npm run build:netlify`
+- **Publish directory**: `frontend/out`
+- **Environment variables**: See `.env.production.example`
+
+### Option 2: Railway + Vercel (Alternative)
+- **Frontend**: Next.js deployed on **Vercel** (free tier)
 - **Backend**: FastAPI deployed on **Railway** (free tier)
 - **Database**: PostgreSQL hosted on **Supabase** (free tier)
-- **Authentication**: Firebase Authentication
-- **AI Service**: OpenRouter (free DeepSeek model)
-- **AI Agent**: Full admin privileges for inventory operations
+- **See**: [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)
 
 ## 🎯 Key Features
 
@@ -19,48 +29,23 @@ A modern, cloud-first inventory management SaaS platform with AI-powered operati
 - ✅ **Order Management**: Complete order lifecycle with inventory updates
 - ✅ **Supplier Management**: Track supplier performance and ratings
 - ✅ **Analytics Dashboard**: Sales reports and inventory insights
-- ✅ **Cloud-Native**: No local servers required
+- ✅ **Cloud-Native**: Deploy on free tier platforms (Netlify, Railway, Vercel, Supabase)
 
 ## 📁 Project Structure
 
 ```
-├── frontend/           # Next.js React application
-├── backend/           # FastAPI backend application
-├── database/          # PostgreSQL schema and migrations
+├── frontend/              # Next.js React application
+├── backend/              # FastAPI backend (for Railway deployment)
+├── netlify/functions/    # Express.js for Netlify Functions
+├── database/             # PostgreSQL schema (for Railway deployment)
 ├── .env.production.example  # Production environment template
-├── railway.toml       # Railway deployment config
-├── vercel.json        # Vercel deployment config
-└── firebase.json      # Firebase project config
+├── netlify.toml          # Netlify deployment config
+├── railway.toml          # Railway deployment config
+├── vercel.json           # Vercel deployment config
+└── firebase.json         # Firebase project config
 ```
 
-## 🛠️ Cloud Deployment Setup
-
-> 📖 **Complete Deployment Guide**: See [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) for detailed step-by-step instructions.
-
-### Quick Start:
-
-1. **Supabase Database**: Create account → New project → Run `database/schema.sql`
-2. **Railway Backend**: Deploy from GitHub → Add environment variables
-3. **Vercel Frontend**: Deploy from GitHub → Configure API URL
-4. **Firebase Auth**: Enable Email/Password authentication
-
-### Required Environment Variables:
-
-**Railway (Backend):**
-```
-DATABASE_URL=postgresql://[from_supabase]
-OPENROUTER_API_KEY=[from_openrouter]
-FIREBASE_PROJECT_ID=[from_firebase]
-FRONTEND_URL=[from_vercel_after_deployment]
-```
-
-**Vercel (Frontend):**
-```
-NEXT_PUBLIC_API_URL=[from_railway]
-NEXT_PUBLIC_FIREBASE_API_KEY=[from_firebase]
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=[from_firebase]
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=[from_firebase]
-```
+## 🚀 Quick Start (Netlify - Recommended)
 2. Connect your GitHub repository
 3. Railway auto-detects Python project
 4. Add environment variables (see `.env.production.example`)
@@ -76,6 +61,7 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=[from_firebase]
 4. Vercel auto-detects Next.js
 5. Add environment variables:
    - `NEXT_PUBLIC_API_URL`: Your Railway backend URL
+   - `NEXT_PUBLIC_API_BASE_URL`: Your Railway backend URL (optional alias)
    - `NEXT_PUBLIC_FIREBASE_API_KEY`: Your Firebase API key
    - `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`: Your Firebase auth domain
    - `NEXT_PUBLIC_FIREBASE_PROJECT_ID`: Your Firebase project ID
@@ -145,6 +131,7 @@ ENVIRONMENT=production
 ### Frontend (Vercel)
 ```env
 NEXT_PUBLIC_API_URL=https://your-railway-app.railway.app
+NEXT_PUBLIC_API_BASE_URL=https://your-railway-app.railway.app
 NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
 NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=project.firebaseapp.com
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
@@ -217,7 +204,7 @@ Once deployed and logged in as admin:
 
 ## Getting started
 
-The current repository is configured for cloud deployment only. Local development can still be done with emulators, but the main architecture is designed for Firebase and Supabase.
+The current repository is configured for cloud deployment only. Run it by deploying to cloud platforms like Railway, Vercel, or Netlify with the required environment variables.
 
 ## Supabase schema
 

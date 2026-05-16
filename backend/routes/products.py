@@ -33,6 +33,28 @@ def create_product(
     return product
 
 
+@router.post("/bulk", response_model=List[ProductRead], status_code=status.HTTP_201_CREATED)
+def create_products_bulk(
+    payload: List[ProductCreate],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("manager")),
+):
+    created_products = []
+    for product_payload in payload:
+        product = Product(**product_payload.dict())
+        if product_payload.category_id:
+            product.category = db.query(Category).filter(Category.id == product_payload.category_id).first()
+        if product_payload.supplier_id:
+            product.supplier = db.query(Supplier).filter(Supplier.id == product_payload.supplier_id).first()
+        db.add(product)
+        created_products.append(product)
+
+    db.commit()
+    for product in created_products:
+        db.refresh(product)
+    return created_products
+
+
 @router.get("/{product_id}", response_model=ProductRead)
 def get_product(product_id: int, db: Session = Depends(get_db)):
     product = db.query(Product).filter(Product.id == product_id).first()

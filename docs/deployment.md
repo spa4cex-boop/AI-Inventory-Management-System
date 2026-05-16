@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This repository is now configured as a cloud-native inventory SaaS platform.
+This repository is configured for cloud deployment only. Local runtime and local database hosting are not part of the supported deployment flow.
 
 ## Services
 

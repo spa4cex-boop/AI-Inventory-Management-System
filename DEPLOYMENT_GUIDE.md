@@ -127,14 +127,8 @@ NEXT_PUBLIC_AUTH_MODE=firebase
 
 ## 🔗 Step 7: Final Configuration
 
-### 7.1 Update Vercel Rewrites
-In `vercel.json`, update the rewrite destination:
-```json
-{
-  "source": "/api/(.*)",
-  "destination": "https://your-railway-backend-url.up.railway.app/api/$1"
-}
-```
+### 7.1 Confirm Vercel Backend API URL
+The frontend uses `NEXT_PUBLIC_API_URL` (or `NEXT_PUBLIC_API_BASE_URL`) to call the backend directly, so no Vercel rewrite is required.
 
 ### 7.2 Test Deployment
 1. Visit your Vercel frontend URL

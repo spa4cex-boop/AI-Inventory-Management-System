@@ -1,0 +1,109 @@
+{
+  "users": [
+    {
+      "uid": "owner-user",
+      "name": "Business Owner",
+      "email": "owner@example.com",
+      "role": "owner",
+      "createdAt": "2026-05-15T00:00:00Z"
+    },
+    {
+      "uid": "staff-user",
+      "name": "Store Staff",
+      "email": "staff@example.com",
+      "role": "staff",
+      "createdAt": "2026-05-15T00:00:00Z"
+    }
+  ],
+  "categories": [
+    { "id": "cat-grocery", "name": "Grocery" },
+    { "id": "cat-electronics", "name": "Electronics" },
+    { "id": "cat-health", "name": "Medical" }
+  ],
+  "suppliers": [
+    { "id": "sup-1", "name": "Local Fresh Foods", "phone": "+123456789", "address": "123 Market St" },
+    { "id": "sup-2", "name": "Premier Electronics", "phone": "+1987654321", "address": "456 Commerce Ave" }
+  ],
+  "products": [
+    {
+      "id": "prod-1",
+      "name": "Organic Apples",
+      "sku": "APL-001",
+      "barcode": "1234567890123",
+      "categoryId": "cat-grocery",
+      "categoryName": "Grocery",
+      "supplierId": "sup-1",
+      "supplierName": "Local Fresh Foods",
+      "quantity": 28,
+      "price": 1.49,
+      "reorderLevel": 20,
+      "imageUrl": "https://via.placeholder.com/128",
+      "createdAt": "2026-05-01T00:00:00Z"
+    },
+    {
+      "id": "prod-2",
+      "name": "Wireless Headphones",
+      "sku": "ELX-201",
+      "barcode": "2345678901234",
+      "categoryId": "cat-electronics",
+      "categoryName": "Electronics",
+      "supplierId": "sup-2",
+      "supplierName": "Premier Electronics",
+      "quantity": 12,
+      "price": 59.99,
+      "reorderLevel": 10,
+      "imageUrl": "https://via.placeholder.com/128",
+      "createdAt": "2026-05-05T00:00:00Z"
+    }
+  ],
+  "orders": [
+    {
+      "id": "order-1",
+      "customerName": "Ayesha Khan",
+      "totalAmount": 77.47,
+      "status": "completed",
+      "createdAt": "2026-05-10T12:30:00Z"
+    }
+  ],
+  "orderItems": [
+    {
+      "id": "item-1",
+      "orderId": "order-1",
+      "productId": "prod-1",
+      "quantity": 7,
+      "price": 1.49
+    },
+    {
+      "id": "item-2",
+      "orderId": "order-1",
+      "productId": "prod-2",
+      "quantity": 1,
+      "price": 59.99
+    }
+  ],
+  "inventoryLogs": [
+    {
+      "id": "log-1",
+      "productId": "prod-1",
+      "action": "stock_update",
+      "quantity": 28,
+      "timestamp": "2026-05-10T12:30:00Z"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "notif-1",
+      "title": "Low stock alert",
+      "message": "Organic Apples quantity dropped below reorder level.",
+      "isRead": false
+    }
+  ],
+  "aiInsights": [
+    {
+      "id": "insight-1",
+      "insight": "Your grocery inventory is healthy, but Wireless Headphones are close to reorder threshold.",
+      "recommendation": "Order at least 20 more Wireless Headphones this week.",
+      "createdAt": "2026-05-12T08:00:00Z"
+    }
+  ]
+}

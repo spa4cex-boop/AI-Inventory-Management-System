@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
+  output: 'export',
   images: {
     remotePatterns: [
       {
@@ -11,7 +11,7 @@ const nextConfig = {
     ],
   },
   webpack: (config) => {
-    return config;
+    return config
   },
 };
 

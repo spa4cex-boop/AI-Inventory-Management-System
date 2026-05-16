@@ -40,7 +40,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (!firebaseAuth) {
       setLoading(false)
-      setError('Firebase is not initialized')
+      setError('Firebase is not initialized. Check your deployment environment variables and Firebase config.')
       return
     }
 
@@ -60,7 +60,8 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       await signInWithEmailAndPassword(firebaseAuth, email, password)
       setError(null)
     } catch (err) {
-      setError('Unable to sign in with email and password')
+      const message = err instanceof Error ? err.message : 'Unable to sign in with email and password'
+      setError(`Sign-in failed: ${message}`)
       throw err
     } finally {
       setLoading(false)
@@ -74,7 +75,8 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       await createUserWithEmailAndPassword(firebaseAuth, email, password)
       setError(null)
     } catch (err) {
-      setError('Unable to register with email and password')
+      const message = err instanceof Error ? err.message : 'Unable to register with email and password'
+      setError(`Registration failed: ${message}`)
       throw err
     } finally {
       setLoading(false)
@@ -89,7 +91,8 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       await signInWithPopup(firebaseAuth, provider)
       setError(null)
     } catch (err) {
-      setError('Unable to sign in with Google')
+      const message = err instanceof Error ? err.message : 'Unable to sign in with Google'
+      setError(`Google sign-in failed: ${message}`)
       throw err
     } finally {
       setLoading(false)

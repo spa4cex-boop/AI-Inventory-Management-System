@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 
 import httpx
 from dotenv import load_dotenv
@@ -8,11 +9,19 @@ from sqlalchemy.orm import Session
 from backend.services.cache import get_cache, set_cache
 from backend.database.models import Product, Order, OrderItem
 
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "sk-or-v1-test-key-free-mode")
+if OPENROUTER_API_KEY.startswith("sk-or-v1-test"):
+    logger.warning(
+        "OPENROUTER_API_KEY is not configured. AI assistant is running in fallback test mode. "
+        "Set OPENROUTER_API_KEY in your environment to enable real OpenRouter responses."
+    )
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat:free")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 AI_ENABLE_CRUD = os.getenv("AI_ENABLE_CRUD", "true").lower() == "true"
+ALLOWED_AI_ACTIONS = {"create_product", "update_product", "create_order"}
 
 
 def execute_ai_action(action_type: str, data: dict, db: Session) -> dict:
@@ -22,17 +31,37 @@ def execute_ai_action(action_type: str, data: dict, db: Session) -> dict:
     
     try:
         if action_type == "create_product":
+            # Safe coercion of numeric fields
+            try:
+                quantity = int(data.get("quantity", 0))
+            except Exception:
+                quantity = 0
+            try:
+                price = float(data.get("price", 0.0))
+            except Exception:
+                price = 0.0
+            try:
+                reorder_level = int(data.get("reorder_level", 10))
+            except Exception:
+                reorder_level = 10
+
             product = Product(
                 name=data.get("name", "AI Generated Product"),
                 sku=data.get("sku", f"AI-{os.urandom(4).hex()}"),
-                quantity=int(data.get("quantity", 0)),
-                price=float(data.get("price", 0.0)),
-                reorder_level=int(data.get("reorder_level", 10)),
+                quantity=quantity,
+                price=price,
+                reorder_level=reorder_level,
             )
             if "category_id" in data:
-                product.category_id = int(data["category_id"])
+                try:
+                    product.category_id = int(data["category_id"])
+                except Exception:
+                    pass
             if "supplier_id" in data:
-                product.supplier_id = int(data["supplier_id"])
+                try:
+                    product.supplier_id = int(data["supplier_id"])
+                except Exception:
+                    pass
             
             db.add(product)
             db.commit()
@@ -41,6 +70,10 @@ def execute_ai_action(action_type: str, data: dict, db: Session) -> dict:
         
         elif action_type == "update_product":
             product_id = data.get("id") or data.get("product_id")
+            try:
+                product_id = int(product_id)
+            except Exception:
+                return {"status": "error", "message": "Invalid product id"}
             product = db.query(Product).filter(Product.id == product_id).first()
             if not product:
                 return {"status": "error", "message": "Product not found"}
@@ -48,20 +81,33 @@ def execute_ai_action(action_type: str, data: dict, db: Session) -> dict:
             if "name" in data:
                 product.name = data["name"]
             if "quantity" in data:
-                product.quantity = int(data["quantity"])
+                try:
+                    product.quantity = int(data["quantity"])
+                except Exception:
+                    pass
             if "price" in data:
-                product.price = float(data["price"])
+                try:
+                    product.price = float(data["price"])
+                except Exception:
+                    pass
             if "reorder_level" in data:
-                product.reorder_level = int(data["reorder_level"])
+                try:
+                    product.reorder_level = int(data["reorder_level"])
+                except Exception:
+                    pass
             
             db.commit()
             db.refresh(product)
             return {"status": "success", "type": "product_updated", "id": product.id}
         
         elif action_type == "create_order":
+            try:
+                total_amount = float(data.get("total_amount", 0.0))
+            except Exception:
+                total_amount = 0.0
             order = Order(
                 customer_name=data.get("customer_name", "AI Order"),
-                total_amount=float(data.get("total_amount", 0.0)),
+                total_amount=total_amount,
                 status=data.get("status", "pending"),
             )
             db.add(order)
@@ -69,16 +115,28 @@ def execute_ai_action(action_type: str, data: dict, db: Session) -> dict:
             
             # Add order items
             for item in data.get("items", []):
-                product = db.query(Product).filter(Product.id == item.get("product_id")).first()
+                try:
+                    pid = int(item.get("product_id"))
+                except Exception:
+                    continue
+                product = db.query(Product).filter(Product.id == pid).first()
                 if product:
+                    try:
+                        qty = int(item.get("quantity", 1))
+                    except Exception:
+                        qty = 1
+                    try:
+                        price = float(item.get("price", product.price))
+                    except Exception:
+                        price = product.price
                     order_item = OrderItem(
                         order_id=order.id,
                         product_id=product.id,
-                        quantity=int(item.get("quantity", 1)),
-                        price=float(item.get("price", product.price)),
+                        quantity=qty,
+                        price=price,
                     )
                     db.add(order_item)
-                    product.quantity = max(0, product.quantity - int(item.get("quantity", 1)))
+                    product.quantity = max(0, product.quantity - qty)
             
             db.commit()
             db.refresh(order)
@@ -138,16 +196,55 @@ def generate_ai_insight(prompt: str, db: Session = None) -> tuple[str, str | Non
         if db and AI_ENABLE_CRUD:
             try:
                 import re
-                json_matches = re.findall(r'\{[^{}]*"action"[^{}]*\}', text)
+                json_matches = re.findall(r'\{[^{}]*"action"[^{}]*\}', text, flags=re.DOTALL)
                 for json_str in json_matches:
                     try:
                         action_data = json.loads(json_str)
-                        action_type = action_data.get("action", "").replace("_", "")
-                        result = execute_ai_action(action_type, action_data, db)
-                        if result["status"] == "success":
+                        action = action_data.get("action", "")
+                        if action not in ALLOWED_AI_ACTIONS:
+                            logger.warning("Ignoring disallowed AI action: %s", action)
+                            continue
+                        # Basic sanitization and safe coercion of numeric fields
+                        if action in ("create_product", "update_product"):
+                            if "quantity" in action_data:
+                                try:
+                                    action_data["quantity"] = int(action_data["quantity"])
+                                except Exception:
+                                    action_data["quantity"] = 0
+                            if "price" in action_data:
+                                try:
+                                    action_data["price"] = float(action_data["price"])
+                                except Exception:
+                                    action_data["price"] = 0.0
+                            if "reorder_level" in action_data:
+                                try:
+                                    action_data["reorder_level"] = int(action_data["reorder_level"])
+                                except Exception:
+                                    action_data["reorder_level"] = 10
+                            if "id" in action_data:
+                                try:
+                                    action_data["id"] = int(action_data["id"])
+                                except Exception:
+                                    pass
+                        if action == "create_order":
+                            items = action_data.get("items", [])
+                            sanitized_items = []
+                            for item in items:
+                                try:
+                                    pid = int(item.get("product_id"))
+                                    qty = int(item.get("quantity", 1))
+                                    price = float(item.get("price", 0.0))
+                                    sanitized_items.append({"product_id": pid, "quantity": qty, "price": price})
+                                except Exception:
+                                    continue
+                            action_data["items"] = sanitized_items
+                        result = execute_ai_action(action, action_data, db)
+                        if result.get("status") == "success":
                             text += f"\n✓ {result['type'].replace('_', ' ').title()}: {result.get('name', result.get('id'))}"
-                    except:
-                        pass
+                    except json.JSONDecodeError:
+                        logger.debug("Failed to decode JSON from AI output: %s", json_str)
+                    except Exception as e:
+                        logger.exception("Error processing AI action: %s", e)
             except:
                 pass
         

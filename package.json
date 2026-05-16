@@ -1,0 +1,31 @@
+{
+  "name": "ai-inventory-deploy",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "install:frontend": "npm --prefix frontend install",
+    "install:functions": "npm --prefix functions install",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:functions": "npm --prefix functions install && npm --prefix functions run build",
+    "build:netlify": "npm install && npm --prefix frontend install && npm --prefix frontend run build",
+    "lint": "npm --prefix frontend run lint",
+    "build": "npm run build:functions && npm run build:frontend",
+    "export:frontend": "npm --prefix frontend run export",
+    "sync:public": "node scripts/copy-export-to-public.js",
+    "deploy:firebase": "npm run build && firebase deploy --only hosting,functions",
+    "test": "echo 'No tests yet'"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "firebase-admin": "^11.11.0",
+    "serverless-http": "^3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.2"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}

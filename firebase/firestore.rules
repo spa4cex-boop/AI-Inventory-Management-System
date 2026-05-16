@@ -1,0 +1,56 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (request.auth.token.role == 'admin' || request.auth.token.role == 'owner' || request.auth.token.admin == true)
+    }
+
+    function isStaff() {
+      return isAuthenticated() && request.auth.token.role == 'staff'
+    }
+
+    match /products/{productId} {
+      allow read: if isAuthenticated()
+      allow create, update, delete: if isAdmin() || isStaff()
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated()
+      allow create: if isAuthenticated()
+      allow update, delete: if isAdmin()
+    }
+
+    match /suppliers/{supplierId} {
+      allow read: if isAuthenticated()
+      allow write: if isAdmin()
+    }
+
+    match /categories/{categoryId} {
+      allow read: if isAuthenticated()
+      allow write: if isAdmin()
+    }
+
+    match /inventoryLogs/{logId} {
+      allow read: if isAuthenticated()
+      allow write: if isAdmin()
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated()
+      allow write: if isAdmin()
+    }
+
+    match /aiInsights/{insightId} {
+      allow read: if isAuthenticated()
+      allow write: if isAdmin()
+    }
+
+    match /{document=**} {
+      allow read, write: if false
+    }
+  }
+}

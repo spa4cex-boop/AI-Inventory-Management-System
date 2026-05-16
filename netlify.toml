@@ -1,0 +1,65 @@
+# Netlify Configuration for AI Inventory Management System
+# Complete deployment configuration for frontend and backend on Netlify
+
+[build]
+  # Install dependencies and build frontend + functions
+  command = "npm install && npm run build:netlify"
+  # Publish frontend static export output
+  publish = "frontend/out"
+  # Functions directory
+  functions = "netlify/functions"
+  # Environment variables from .env file are auto-loaded
+
+[build.environment]
+  # Node.js version
+  NODE_VERSION = "20"
+
+# Redirect all API calls to Netlify Functions
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# Health check endpoint
+[[redirects]]
+  from = "/healthz"
+  to = "/.netlify/functions/api/healthz"
+  status = 200
+
+# Catch-all for SPA routing (Next.js)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Cache settings
+[[headers]]
+  for = "/"
+    [headers.values]
+      X-Frame-Options = "SAMEORIGIN"
+      X-Content-Type-Options = "nosniff"
+      X-XSS-Protection = "1; mode=block"
+      Referrer-Policy = "strict-origin-when-cross-origin"
+      Permissions-Policy = "geolocation=(), camera=(), microphone=()"
+      Cache-Control = "public, max-age=3600, must-revalidate"
+
+[[headers]]
+  for = "/*.js"
+    [headers.values]
+      Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.css"
+    [headers.values]
+      Cache-Control = "public, max-age=31536000, immutable"
+
+# Context-specific configurations
+[context.production]
+  environment = { NODE_ENV = "production" }
+  
+[context.branch-deploy]
+  environment = { NODE_ENV = "development" }
+  
+[context.deploy-preview]
+  environment = { NODE_ENV = "development" }
+

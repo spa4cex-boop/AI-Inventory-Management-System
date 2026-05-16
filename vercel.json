@@ -13,12 +13,6 @@
     "NEXT_PUBLIC_FIREBASE_PROJECT_ID": "@next_public_firebase_project_id",
     "NEXT_PUBLIC_AUTH_MODE": "firebase"
   },
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "https://your-railway-backend-url.up.railway.app/api/$1"
-    }
-  ],
   "functions": {
     "frontend/**/*.js": {
       "runtime": "nodejs18.x"

@@ -3,52 +3,20 @@ import * as functions from 'firebase-functions'
 import axios from 'axios'
 import cors from 'cors'
 import express from 'express'
-import { Pool } from 'pg'
 
 const app = express()
 app.use(cors({ origin: true }))
 app.use(express.json())
 
-const firebaseProjectId = process.env.FIREBASE_PROJECT_ID
-const firebaseClientEmail = process.env.FIREBASE_CLIENT_EMAIL
-const firebasePrivateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+admin.initializeApp()
+const db = admin.firestore()
 
-if (firebaseProjectId && firebaseClientEmail && firebasePrivateKey) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: firebaseProjectId,
-      clientEmail: firebaseClientEmail,
-      privateKey: firebasePrivateKey,
-    }),
-  })
-} else {
-  admin.initializeApp()
-}
-
-const SUPABASE_DATABASE_URL = process.env.SUPABASE_DATABASE_URL
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'deepseek/deepseek-chat:free'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
-if (!SUPABASE_DATABASE_URL) {
-  throw new Error('Missing required environment variable SUPABASE_DATABASE_URL')
-}
 if (!OPENROUTER_API_KEY) {
   throw new Error('Missing required environment variable OPENROUTER_API_KEY')
-}
-
-const pool = new Pool({
-  connectionString: SUPABASE_DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-})
-
-async function query(sql: string, params: unknown[] = []) {
-  const client = await pool.connect()
-  try {
-    return await client.query(sql, params)
-  } finally {
-    client.release()
-  }
 }
 
 async function verifyFirebaseToken(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -69,15 +37,20 @@ async function verifyFirebaseToken(req: express.Request, res: express.Response, 
   }
 }
 
+function getUserRole(user: admin.auth.DecodedIdToken | null): string {
+  if (!user) return 'staff'
+  return (user.role as string) || (user.role_claims as any)?.role || 'staff'
+}
+
 function requireRole(role: string) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const user = (req as any).user
+    const user = (req as any).user as admin.auth.DecodedIdToken | null
     if (!user) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
 
-    const userRole = (user.role || user.role_claims || 'staff') as string
-    if (userRole !== role && userRole !== 'admin') {
+    const userRole = getUserRole(user)
+    if (userRole !== role && userRole !== 'admin' && userRole !== 'owner') {
       return res.status(403).json({ error: 'Forbidden: insufficient permissions' })
     }
 
@@ -90,192 +63,378 @@ app.get('/healthz', (req, res) => {
 })
 
 app.get('/products', verifyFirebaseToken, async (req, res) => {
-  const limit = Number(req.query.limit || 100)
-  const offset = Number(req.query.offset || 0)
-  const result = await query('SELECT * FROM products ORDER BY id DESC LIMIT $1 OFFSET $2', [limit, offset])
-  res.json(result.rows)
+  try {
+    const snapshot = await db.collection('products').orderBy('createdAt', 'desc').limit(100).get()
+    const products = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    res.json(products)
+  } catch (error) {
+    console.error('Failed to load products:', error)
+    res.status(500).json({ error: 'Unable to load products' })
+  }
 })
 
 app.post('/products', verifyFirebaseToken, async (req, res) => {
-  const { name, sku, barcode, category_id, supplier_id, quantity, price, reorder_level, expiry_date, image_url } = req.body
-  const result = await query(
-    `INSERT INTO products (name, sku, barcode, category_id, supplier_id, quantity, price, reorder_level, expiry_date, image_url)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [name, sku, barcode || null, category_id || null, supplier_id || null, quantity || 0, price || 0.0, reorder_level || 0, expiry_date || null, image_url || null]
-  )
-  res.status(201).json(result.rows[0])
+  const { name, sku, barcode, categoryId, categoryName, supplierId, supplierName, quantity, price, reorderLevel, expiryDate, imageUrl } = req.body
+  if (!name || !sku) {
+    return res.status(400).json({ error: 'Product name and SKU are required' })
+  }
+
+  try {
+    const docRef = await db.collection('products').add({
+      name,
+      sku,
+      barcode: barcode || null,
+      categoryId: categoryId || null,
+      categoryName: categoryName || null,
+      supplierId: supplierId || null,
+      supplierName: supplierName || null,
+      quantity: Number(quantity || 0),
+      price: Number(price || 0),
+      reorderLevel: Number(reorderLevel || 0),
+      expiryDate: expiryDate || null,
+      imageUrl: imageUrl || null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    })
+    const snapshot = await docRef.get()
+    res.status(201).json({ id: docRef.id, ...snapshot.data() })
+  } catch (error) {
+    console.error('Failed to create product:', error)
+    res.status(500).json({ error: 'Unable to create product' })
+  }
 })
 
-app.get('/products/:id', verifyFirebaseToken, async (req, res) => {
-  const result = await query('SELECT * FROM products WHERE id = $1', [Number(req.params.id)])
-  if (!result.rowCount) {
-    return res.status(404).json({ error: 'Product not found' })
+app.post('/products/bulk', verifyFirebaseToken, async (req, res) => {
+  const products = req.body
+  if (!Array.isArray(products) || products.length === 0) {
+    return res.status(400).json({ error: 'A non-empty array of products is required' })
   }
-  res.json(result.rows[0])
+
+  try {
+    const batch = db.batch()
+    const createdProducts: any[] = []
+
+    products.forEach((product: any) => {
+      const { name, sku, barcode, categoryId, categoryName, supplierId, supplierName, quantity, price, reorderLevel, expiryDate, imageUrl } = product
+      if (!name || !sku) {
+        return
+      }
+      const productRef = db.collection('products').doc()
+      batch.set(productRef, {
+        name,
+        sku,
+        barcode: barcode || null,
+        categoryId: categoryId || null,
+        categoryName: categoryName || null,
+        supplierId: supplierId || null,
+        supplierName: supplierName || null,
+        quantity: Number(quantity || 0),
+        price: Number(price || 0),
+        reorderLevel: Number(reorderLevel || 0),
+        expiryDate: expiryDate || null,
+        imageUrl: imageUrl || null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      })
+      createdProducts.push({ id: productRef.id, name, sku, barcode: barcode || null, categoryId: categoryId || null, categoryName: categoryName || null, supplierId: supplierId || null, supplierName: supplierName || null, quantity: Number(quantity || 0), price: Number(price || 0), reorderLevel: Number(reorderLevel || 0), expiryDate: expiryDate || null, imageUrl: imageUrl || null })
+    })
+
+    await batch.commit()
+    res.status(201).json(createdProducts)
+  } catch (error) {
+    console.error('Failed to bulk create products:', error)
+    res.status(500).json({ error: 'Unable to bulk create products' })
+  }
 })
 
 app.put('/products/:id', verifyFirebaseToken, async (req, res) => {
-  const productId = Number(req.params.id)
+  const productId = req.params.id
   const fields = req.body
-  const keys = Object.keys(fields)
-  if (!keys.length) {
+  if (!Object.keys(fields).length) {
     return res.status(400).json({ error: 'No fields provided for update' })
   }
 
-  const sets = keys.map((key, index) => `${key} = $${index + 1}`).join(', ')
-  const values = keys.map((key) => fields[key])
-  values.push(productId)
+  try {
+    const productRef = db.collection('products').doc(productId)
+    const snapshot = await productRef.get()
+    if (!snapshot.exists) {
+      return res.status(404).json({ error: 'Product not found' })
+    }
 
-  const result = await query(`UPDATE products SET ${sets} WHERE id = $${values.length} RETURNING *`, values)
-  if (!result.rowCount) {
-    return res.status(404).json({ error: 'Product not found' })
+    await productRef.update(fields)
+    const updated = await productRef.get()
+    res.json({ id: updated.id, ...updated.data() })
+  } catch (error) {
+    console.error('Failed to update product:', error)
+    res.status(500).json({ error: 'Unable to update product' })
   }
-  res.json(result.rows[0])
 })
 
 app.delete('/products/:id', verifyFirebaseToken, async (req, res) => {
-  const result = await query('DELETE FROM products WHERE id = $1 RETURNING id', [Number(req.params.id)])
-  if (!result.rowCount) {
-    return res.status(404).json({ error: 'Product not found' })
-  }
-  res.status(204).send(null)
-})
-
-app.get('/orders', verifyFirebaseToken, async (req, res) => {
-  const result = await query('SELECT * FROM orders ORDER BY created_at DESC')
-  res.json(result.rows)
-})
-
-app.post('/orders', verifyFirebaseToken, async (req, res) => {
-  const { customer_name, items = [], status = 'pending' } = req.body
-  if (!customer_name || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'customer_name and items are required' })
-  }
-
-  const client = await pool.connect()
+  const productId = req.params.id
   try {
-    await client.query('BEGIN')
-    const orderResult = await client.query(
-      'INSERT INTO orders (customer_name, total_amount, status) VALUES ($1, $2, $3) RETURNING *',
-      [customer_name, 0.0, status]
-    )
-    const order = orderResult.rows[0]
-    let totalAmount = 0
-
-    for (const item of items) {
-      const productResult = await client.query('SELECT * FROM products WHERE id = $1', [Number(item.product_id)])
-      if (productResult.rowCount === 0) {
-        throw new Error(`Product not found: ${item.product_id}`)
-      }
-      const product = productResult.rows[0]
-      const quantity = Number(item.quantity || 1)
-      const price = Number(item.price ?? product.price)
-      totalAmount += price * quantity
-
-      await client.query(
-        'INSERT INTO order_items (order_id, product_id, quantity, price) VALUES ($1, $2, $3, $4)',
-        [order.id, product.id, quantity, price]
-      )
-      await client.query('UPDATE products SET quantity = GREATEST(quantity - $1, 0) WHERE id = $2', [quantity, product.id])
-    }
-
-    const updatedOrderResult = await client.query('UPDATE orders SET total_amount = $1 WHERE id = $2 RETURNING *', [totalAmount, order.id])
-    await client.query('COMMIT')
-    res.status(201).json(updatedOrderResult.rows[0])
+    await db.collection('products').doc(productId).delete()
+    res.status(204).send(null)
   } catch (error) {
-    await client.query('ROLLBACK')
-    console.error('Order creation failed:', error)
-    res.status(500).json({ error: String(error) })
-  } finally {
-    client.release()
+    console.error('Failed to delete product:', error)
+    res.status(500).json({ error: 'Unable to delete product' })
+  }
+})
+
+app.get('/categories', verifyFirebaseToken, async (req, res) => {
+  try {
+    const snapshot = await db.collection('categories').orderBy('name').get()
+    const categories = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    res.json(categories)
+  } catch (error) {
+    console.error('Failed to load categories:', error)
+    res.status(500).json({ error: 'Unable to load categories' })
+  }
+})
+
+app.post('/categories', verifyFirebaseToken, requireRole('admin'), async (req, res) => {
+  const { name } = req.body
+  if (!name) {
+    return res.status(400).json({ error: 'Category name is required' })
+  }
+
+  try {
+    const docRef = await db.collection('categories').add({ name, createdAt: admin.firestore.FieldValue.serverTimestamp() })
+    const snapshot = await docRef.get()
+    res.status(201).json({ id: docRef.id, ...snapshot.data() })
+  } catch (error) {
+    console.error('Failed to create category:', error)
+    res.status(500).json({ error: 'Unable to create category' })
   }
 })
 
 app.get('/suppliers', verifyFirebaseToken, async (req, res) => {
-  const result = await query('SELECT * FROM suppliers ORDER BY id DESC')
-  res.json(result.rows)
+  try {
+    const snapshot = await db.collection('suppliers').orderBy('name').get()
+    const suppliers = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    res.json(suppliers)
+  } catch (error) {
+    console.error('Failed to load suppliers:', error)
+    res.status(500).json({ error: 'Unable to load suppliers' })
+  }
 })
 
 app.post('/suppliers', verifyFirebaseToken, async (req, res) => {
-  const { name, email, phone, address, rating } = req.body
-  const result = await query(
-    'INSERT INTO suppliers (name, email, phone, address, rating) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-    [name, email || null, phone || null, address || null, rating || 0.0]
-  )
-  res.status(201).json(result.rows[0])
+  const { name, email, phone, address } = req.body
+  if (!name) {
+    return res.status(400).json({ error: 'Supplier name is required' })
+  }
+
+  try {
+    const docRef = await db.collection('suppliers').add({
+      name,
+      email: email || null,
+      phone: phone || null,
+      address: address || null,
+      rating: 0,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    })
+    const snapshot = await docRef.get()
+    res.status(201).json({ id: docRef.id, ...snapshot.data() })
+  } catch (error) {
+    console.error('Failed to create supplier:', error)
+    res.status(500).json({ error: 'Unable to create supplier' })
+  }
 })
 
-app.put('/suppliers/:id', verifyFirebaseToken, async (req, res) => {
-  const supplierId = Number(req.params.id)
-  const fields = req.body
-  const keys = Object.keys(fields)
-  if (!keys.length) {
-    return res.status(400).json({ error: 'No fields provided for update' })
+app.get('/orders', verifyFirebaseToken, async (req, res) => {
+  try {
+    const snapshot = await db.collection('orders').orderBy('createdAt', 'desc').get()
+    const orders = await Promise.all(
+      snapshot.docs.map(async (doc) => {
+        const data = doc.data()
+        const itemsSnapshot = await db.collection('orderItems').where('orderId', '==', doc.id).get()
+        return {
+          id: doc.id,
+          ...data,
+          items: itemsSnapshot.docs.map((itemDoc) => ({ id: itemDoc.id, ...itemDoc.data() })),
+        }
+      })
+    )
+    res.json(orders)
+  } catch (error) {
+    console.error('Failed to load orders:', error)
+    res.status(500).json({ error: 'Unable to load orders' })
   }
-  const sets = keys.map((key, index) => `${key} = $${index + 1}`).join(', ')
-  const values = keys.map((key) => fields[key])
-  values.push(supplierId)
-  const result = await query(`UPDATE suppliers SET ${sets} WHERE id = $${values.length} RETURNING *`, values)
-  if (!result.rowCount) {
-    return res.status(404).json({ error: 'Supplier not found' })
-  }
-  res.json(result.rows[0])
 })
 
-app.delete('/suppliers/:id', verifyFirebaseToken, async (req, res) => {
-  const result = await query('DELETE FROM suppliers WHERE id = $1 RETURNING id', [Number(req.params.id)])
-  if (!result.rowCount) {
-    return res.status(404).json({ error: 'Supplier not found' })
+app.post('/orders', verifyFirebaseToken, async (req, res) => {
+  const { customerName, items = [], status = 'pending' } = req.body
+  if (!customerName || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'customerName and items are required' })
   }
-  res.status(204).send(null)
+
+  try {
+    const orderRef = db.collection('orders').doc()
+    const batch = db.batch()
+    const totalAmount = items.reduce(
+      (sum: number, item: any) => sum + Number(item.price || 0) * Number(item.quantity || 1),
+      0
+    )
+
+    batch.set(orderRef, {
+      customerName,
+      totalAmount,
+      status,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    })
+
+    items.forEach((item: any) => {
+      const productRef = db.collection('products').doc(item.productId)
+      const orderItemRef = db.collection('orderItems').doc()
+      batch.update(productRef, { quantity: admin.firestore.FieldValue.increment(-Number(item.quantity || 1)) })
+      batch.set(orderItemRef, {
+        orderId: orderRef.id,
+        productId: item.productId,
+        productName: item.productName || null,
+        quantity: Number(item.quantity || 1),
+        price: Number(item.price || 0),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      })
+      const logRef = db.collection('inventoryLogs').doc()
+      batch.set(logRef, {
+        productId: item.productId,
+        action: 'order',
+        quantity: Number(item.quantity || 1),
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      })
+    })
+
+    await batch.commit()
+    const createdOrder = await orderRef.get()
+    res.status(201).json({ id: createdOrder.id, ...createdOrder.data() })
+  } catch (error) {
+    console.error('Failed to create order:', error)
+    res.status(500).json({ error: 'Unable to create order' })
+  }
 })
 
 app.get('/inventory/low-stock', verifyFirebaseToken, async (req, res) => {
-  const result = await query('SELECT * FROM products WHERE quantity <= reorder_level ORDER BY quantity ASC')
-  res.json(result.rows)
+  try {
+    const snapshot = await db.collection('products').get()
+    const products = snapshot.docs
+      .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
+      .filter((product: any) => {
+        const quantity = Number(product.quantity || 0)
+        const reorderLevel = Number(product.reorderLevel || 0)
+        return quantity <= reorderLevel
+      })
+    res.json(products)
+  } catch (error) {
+    console.error('Failed to load low-stock products:', error)
+    res.status(500).json({ error: 'Unable to load low-stock products' })
+  }
 })
 
-app.get('/reports/inventory', verifyFirebaseToken, async (req, res) => {
-  const lowStock = await query('SELECT COUNT(*) AS low_stock FROM products WHERE quantity <= reorder_level')
-  const totalProducts = await query('SELECT COUNT(*) AS total_products FROM products')
-  const totalOrders = await query('SELECT COUNT(*) AS total_orders FROM orders')
-  res.json({
-    low_stock: Number(lowStock.rows[0]?.low_stock || 0),
-    total_products: Number(totalProducts.rows[0]?.total_products || 0),
-    total_orders: Number(totalOrders.rows[0]?.total_orders || 0),
-  })
+app.get('/reports/dashboard', verifyFirebaseToken, async (req, res) => {
+  try {
+    const [productSnapshot, orderSnapshot] = await Promise.all([
+      db.collection('products').get(),
+      db.collection('orders').get(),
+    ])
+
+    const lowStockProducts = productSnapshot.docs
+      .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
+      .filter((product: any) => {
+        const quantity = Number(product.quantity || 0)
+        const reorderLevel = Number(product.reorderLevel || 0)
+        return quantity <= reorderLevel
+      })
+
+    const totalProducts = productSnapshot.size
+    const totalOrders = orderSnapshot.size
+    let totalRevenue = 0
+    const monthlyMap = new Map<string, number>()
+    const categoryMap = new Map<string, number>()
+
+    orderSnapshot.docs.forEach((doc) => {
+      const data = doc.data()
+      const createdAt = data.createdAt?.toDate?.()
+      if (createdAt) {
+        const month = createdAt.toLocaleString('default', { month: 'short', year: 'numeric' })
+        monthlyMap.set(month, (monthlyMap.get(month) || 0) + Number(data.totalAmount || 0))
+      }
+      totalRevenue += Number(data.totalAmount || 0)
+    })
+
+    productSnapshot.docs.forEach((doc) => {
+      const data = doc.data()
+      const category = data.categoryName || 'General'
+      categoryMap.set(category, (categoryMap.get(category) || 0) + 1)
+    })
+
+    const monthlySales = Array.from(monthlyMap.entries())
+      .map(([month, revenue]) => ({ month, revenue }))
+      .sort((a, b) => a.month.localeCompare(b.month))
+
+    const categoryBreakdown = Array.from(categoryMap.entries()).map(([category, count]) => ({ category, count }))
+
+    res.json({
+      totalProducts,
+      lowStockCount: lowStockProducts.length,
+      totalOrders,
+      totalRevenue,
+      monthlySales,
+      categoryBreakdown,
+      lowStockProducts,
+    })
+  } catch (error) {
+    console.error('Failed to load dashboard metrics:', error)
+    res.status(500).json({ error: 'Unable to load dashboard metrics' })
+  }
 })
 
 app.get('/notifications', verifyFirebaseToken, async (req, res) => {
-  const result = await query('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 100')
-  res.json(result.rows)
+  try {
+    const snapshot = await db.collection('notifications').orderBy('createdAt', 'desc').limit(100).get()
+    const notifications = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    res.json(notifications)
+  } catch (error) {
+    console.error('Failed to load notifications:', error)
+    res.status(500).json({ error: 'Unable to load notifications' })
+  }
 })
 
 app.post('/notifications', verifyFirebaseToken, async (req, res) => {
-  const { title, message, type = 'info', fcm_token } = req.body
-  const result = await query(
-    'INSERT INTO notifications (title, message, type) VALUES ($1,$2,$3) RETURNING *',
-    [title, message, type]
-  )
-  const notification = result.rows[0]
-
-  if (fcm_token) {
-    try {
-      await admin.messaging().send({
-        token: fcm_token,
-        notification: {
-          title,
-          body: message,
-        },
-        android: { priority: 'high' },
-        apns: { headers: { 'apns-priority': '10' } },
-      })
-    } catch (sendError) {
-      console.warn('Failed to send FCM notification:', sendError)
-    }
+  const { title, message, type = 'info', fcmToken } = req.body
+  if (!title || !message) {
+    return res.status(400).json({ error: 'Title and message are required' })
   }
 
-  res.status(201).json(notification)
+  try {
+    const docRef = await db.collection('notifications').add({
+      title,
+      message,
+      type,
+      isRead: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    })
+    const notification = { id: docRef.id, title, message, type, isRead: false }
+
+    if (fcmToken) {
+      try {
+        await admin.messaging().send({
+          token: fcmToken,
+          notification: {
+            title,
+            body: message,
+          },
+          android: { priority: 'high' },
+          apns: { headers: { 'apns-priority': '10' } },
+        })
+      } catch (sendError) {
+        console.warn('FCM notification error:', sendError)
+      }
+    }
+
+    res.status(201).json(notification)
+  } catch (error) {
+    console.error('Failed to create notification:', error)
+    res.status(500).json({ error: 'Unable to save notification' })
+  }
 })
 
 app.post('/ai/assist', verifyFirebaseToken, async (req, res) => {
@@ -308,9 +467,13 @@ app.post('/ai/assist', verifyFirebaseToken, async (req, res) => {
       }
     )
 
-    const message = response.data?.choices?.[0]?.message?.content || ''
-    await query('INSERT INTO ai_insights (insight, recommendation) VALUES ($1, $2)', [message, null])
-    res.json({ assistant: message })
+    const assistant = response.data?.choices?.[0]?.message?.content || ''
+    await db.collection('aiInsights').add({
+      insight: assistant,
+      recommendation: null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    })
+    res.json({ assistant })
   } catch (error) {
     console.error('AI assistant error:', error)
     res.status(502).json({ error: 'Failed to generate AI response' })
